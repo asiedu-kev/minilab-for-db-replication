@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+    laravel.test:
+        build:
+            context: ./vendor/laravel/sail/runtimes/8.3
+            dockerfile: Dockerfile
+            args:
+                WWWGROUP: '${WWWGROUP}'
+        image: sail-8.3/app
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+        ports:
+            - '${APP_PORT:-80}:80'
+            - '${VITE_PORT:-5173}:${VITE_PORT:-5173}'
+        environment:
+            WWWUSER: '${WWWUSER}'
+            LARAVEL_SAIL: 1
+            XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
+            XDEBUG_CONFIG: '${SAIL_XDEBUG_CONFIG:-client_host=host.docker.internal}'
+            IGNITION_LOCAL_SITES_PATH: '${PWD}'
+        volumes:
+            - '.:/var/www/html'
+        networks:
+            - sail
+        depends_on:
+            - mysql_master
+            - mysql_slave
+
+    mysql_master:
+        # We'll use the latest MySQL image from Docker Hub
+        image: mysql:8.0
+        # Give it a cool name (mysql-master is pretty clear, right?)
+        container_name: "mysql_master"
+#        # Extra commands to configure the master for replication
+#        command: --server-id=1 --log-bin=mysql-bin --binlog-format=row
+        # Set some environment variables for passwords and database details
+        # Remember to replace these with your own strong passwords!
+        environment:
+            MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
+            MYSQL_DATABASE: '${DB_DATABASE}' # Feel free to change this database name
+            MYSQL_USER: '${DB_USERNAME}'# This user will handle replication
+            MYSQL_LOWER_CASE_TABLE_NAMES: '0'
+        volumes:
+            - ./master/conf/mysql.conf.cnf:/etc/mysql/conf.d/mysql.conf.cnf
+            - ./master/data:/var/lib/mysql
+        # Map the container port (3306) to your host machine's port (also 3306)
+        # This lets you access the master server from your machine
+        ports:
+            - "3306:3306"
+        networks:
+            - sail
+
+    # The replica server, the master's trusty sidekick
+    mysql_slave:
+        # Same image as the master
+        image: mysql:8.0
+        # Another cool name (can you guess what it is?)
+        container_name: "mysql_slave"
+        # This tells the replica to wait for the master to be ready before starting
+        depends_on:
+            - mysql_master
+#        # Similar commands and environment variables as the master
+#        command: --server-id=2 --log-bin=mysql-bin --binlog-format=row
+        environment:
+            MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}' # Same password for both
+            MYSQL_DATABASE: '${DB_SLAVE_DATABASE}'
+            MYSQL_USER: '${DB_SLAVE_USERNAME}'
+            MYSQL_LOWER_CASE_TABLE_NAMES: '0'
+        volumes:
+            - ./slave/conf/mysql.conf.cnf:/etc/mysql/conf.d/mysql.conf.cnf
+            - ./slave/data:/var/lib/mysql
+        # Map the container port (3306) to a different host machine port (3307 in this case)
+        ports:
+            - "3307:3306"
+        networks:
+            - sail
+
+
+networks:
+    sail:
+        driver: bridge
